@@ -48,7 +48,7 @@ elif not NPX_PATH:
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except KeyError:
-    st.error("🚨 GEMINI_API_KEY not found in secrets! Please configure it in .streamlit/secrets.toml.")
+    st.error("🚨 GEMINI_API_KEY not found in secrets! Please configure it in .streamlit/secrets.toml or Streamlit Cloud Settings.")
     st.stop()
 
 GEMINI_MODEL = 'gemini-2.5-flash-lite'
@@ -88,14 +88,9 @@ def get_user_isolated_env():
     env["npm_config_loglevel"] = "error"
     env["npm_config_yes"] = "true"
     
-    # Aggressive Isolation so user tokens don't mix up
-    auth_dir = st.session_state.session_auth_dir
-    env["MCP_REMOTE_CONFIG_DIR"] = auth_dir 
-    env["HOME"] = auth_dir
-    env["USERPROFILE"] = auth_dir
-    env["APPDATA"] = auth_dir
-    env["LOCALAPPDATA"] = auth_dir
-    env["XDG_CONFIG_HOME"] = auth_dir
+    # ISOLATION FIX: ONLY isolate the MCP Config directory.
+    # We allow the system to keep its real HOME so npm can access its cache without crashing!
+    env["MCP_REMOTE_CONFIG_DIR"] = st.session_state.session_auth_dir
     
     # If the user pasted manual tokens in the sidebar, inject them too
     if st.session_state.get("manual_swiggy_token"):
@@ -153,8 +148,9 @@ async def fetch_tools_from_server(server_name: str, url: str):
 
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
-            response = await session.list_tools()
+            # Added a 30-second timeout! If the cloud server hangs, it will gracefully stop instead of freezing your app forever.
+            await asyncio.wait_for(session.initialize(), timeout=30.0)
+            response = await asyncio.wait_for(session.list_tools(), timeout=30.0)
             return response.tools, args
 
 async def load_all_mcp_servers():
